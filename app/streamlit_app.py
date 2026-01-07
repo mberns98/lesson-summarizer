@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import uuid  # Generate unique run IDs (used for naming outputs and tracking a generation run)
 import streamlit as st
+import re
 from dataclasses import dataclass
 from lesson_summarizer.core import summarize_long_text_to_markdown
+
+from lesson_summarizer.pdf_export import markdown_to_pdf_bytes
 
 from dotenv import load_dotenv
 load_dotenv()  # Load .env file if present to set GEMINI_API_KEY, etc.
@@ -65,6 +68,20 @@ def _init_state() -> None:
         st.session_state.input_text = ""
         # Store the raw text input separately to avoid coupling large text blobs
         # directly to the UIState configuration object 
+
+def _safe_filename(name: str) -> str:
+    name = (name or "").strip()
+    if not name:
+        return "documento"
+
+    # reemplaza espacios por guiones bajos
+    name = re.sub(r"\s+", "_", name)
+
+    # deja solo letras, números, guion, underscore y punto
+    name = re.sub(r"[^A-Za-z0-9._-]", "", name)
+
+    # evita nombres vacíos o solo símbolos
+    return name or "documento"
 
 def main() -> None:
     """
@@ -199,8 +216,14 @@ def main() -> None:
                                                     chunk_size_chars=10_000,
                                                     overlap_chars=500,
                                                     )
-
-                st.session_state.last_run = {"run_id": run_id, "markdown": md}
+                
+                pdf_bytes = markdown_to_pdf_bytes(md, title=ui.title or "Resumen")
+                st.session_state.last_run = {
+                    "run_id": run_id,
+                    "markdown": md,
+                    "pdf_bytes": pdf_bytes,
+                    "title": ui.title,
+                }
                 st.success(f"Listo. Run ID: {run_id}")
 
             except Exception as e:
@@ -218,19 +241,19 @@ def main() -> None:
             st.markdown(last["markdown"])
 
             st.download_button(
-                "⬇️ Descargar (mock .md)",
+                "⬇️ Descargar Markdown",
                 data=last["markdown"].encode("utf-8"),
-                file_name=f"{last['run_id']}.md",
+                file_name=f"{_safe_filename(last.get('title') or last['run_id'])}.md",
                 mime="text/markdown",
                 use_container_width=True,
             )
 
             # Placeholder “PDF” para que la UX quede armada
             st.download_button(
-                "⬇️ Descargar (mock .txt)",
-                data=("PDF pendiente. Esto es un placeholder.\n\n" + last["markdown"]).encode("utf-8"),
-                file_name=f"{last['run_id']}.txt",
-                mime="text/plain",
+                "⬇️ Descargar PDF",
+                data=last["pdf_bytes"],
+                file_name=f"{_safe_filename(last.get('title') or last['run_id'])}.pdf",
+                mime="application/pdf",
                 use_container_width=True,
             )
 
