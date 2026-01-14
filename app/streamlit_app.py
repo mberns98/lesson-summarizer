@@ -300,7 +300,8 @@ def main() -> None:
         if not last:
             st.info("Todavía no generaste nada.")
         else:
-            st.markdown(last["markdown"])
+            with st.expander("👀 Preview (opcional)", expanded=False):
+                st.markdown(last["markdown"])
 
             st.download_button(
                 "⬇️ Descargar Markdown",
@@ -310,7 +311,6 @@ def main() -> None:
                 use_container_width=True,
             )
 
-            # Placeholder “PDF” para que la UX quede armada
             st.download_button(
                 "⬇️ Descargar PDF",
                 data=last["pdf_bytes"],
