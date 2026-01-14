@@ -212,7 +212,6 @@ def main() -> None:
 
         elif ui.input_type == "audio":
             st.subheader("🎧 Audio")
-            st.caption("Todavía no está implementada la transcripción. Por ahora solo UI.")
             uploaded_audio = st.file_uploader("Subí un audio", type=["mp3", "wav", "m4a", "flac", "mp4"])
             st.session_state.uploaded_audio = uploaded_audio
 
