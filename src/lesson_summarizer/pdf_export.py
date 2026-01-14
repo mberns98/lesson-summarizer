@@ -65,23 +65,34 @@ def markdown_to_pdf_bytes(md: str, *, title: str = "Resumen") -> bytes:
     def md_inline_to_rl(s: str) -> str:
         """
         Convert a small subset of Markdown inline formatting to ReportLab tags.
-        Supports:
-        - **bold**
-        - *italic*
-        - `code` (rendered as <font face="Courier">)
+        Robust against code blocks containing * or other markdown chars.
         """
         s = esc(s)
 
-        # code first (so we don't format inside it)
-        s = re.sub(r"`([^`]+)`", r'<font face="Courier">\1</font>', s)
+        # 1) extract inline code first
+        code_spans: list[str] = []
 
-        # bold: **text**
+        def _code_repl(match):
+            code_spans.append(match.group(1))
+            return f"@@CODE{len(code_spans) - 1}@@"
+
+        s = re.sub(r"`([^`]+)`", _code_repl, s)
+
+        # 2) bold
         s = re.sub(r"\*\*([^*]+)\*\*", r"<b>\1</b>", s)
 
-        # italic: *text* (avoid matching inside bold already converted)
+        # 3) italic (single *)
         s = re.sub(r"(?<!\*)\*([^*]+)\*(?!\*)", r"<i>\1</i>", s)
 
+        # 4) restore code spans (NO formatting inside)
+        for i, code in enumerate(code_spans):
+            s = s.replace(
+                f"@@CODE{i}@@",
+                f'<font face="Courier">{code}</font>'
+            )
+
         return s
+
 
 
     def flush_bullets() -> None:

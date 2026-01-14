@@ -8,6 +8,10 @@ from lesson_summarizer.core import summarize_long_text_to_markdown
 
 from lesson_summarizer.pdf_export import markdown_to_pdf_bytes
 
+import tempfile
+from lesson_summarizer.transcription.youtube import get_youtube_text
+from lesson_summarizer.transcription.audio import transcribe_audio_file
+
 from dotenv import load_dotenv
 load_dotenv()  # Load .env file if present to set GEMINI_API_KEY, etc.
 
@@ -42,7 +46,8 @@ class UIState:
     It is stored in st.session_state to persist values across Streamlit reruns.
     """
     input_type: str = "text"  # Input source type selected by the user (text / youtube / audio)
-    language: str = "es"  # Output language for the generated document (passed to the prompt)
+    input_language: str = "auto"   # Input language of the source (for transcription); "auto" means auto-detect
+    output_language: str = "es"    # Output language for the generated document (passed to the prompt)
     topic: str = "Clase"  # Subject or course context provided by the user (used as prompt context)
     title: str = ""  # Optional document title (used for markdown header and file naming)
     role_key: str = "philosophy_expert"  # Selected role preset key (mapped to prompt instructions later)
@@ -115,12 +120,22 @@ def main() -> None:
             index=["text", "youtube", "audio"].index(ui.input_type),
         )
 
-        # Fallback to first language if stored value is no longer valid
-        ui.language = st.selectbox(
-            "Idioma",
-            options=LANG_OPTIONS,
-            index=LANG_OPTIONS.index(ui.language) if ui.language in LANG_OPTIONS else 0,
+        ui.input_language = st.selectbox(
+            "Idioma del contenido (input)",
+            options=["auto", "es", "en", "pt", "fr"],
+            index=["auto", "es", "en", "pt", "fr"].index(ui.input_language)
+            if ui.input_language in ["auto", "es", "en", "pt", "fr"]
+            else 0,
         )
+
+        ui.output_language = st.selectbox(
+            "Idioma del resumen (output)",
+            options=LANG_OPTIONS,
+            index=LANG_OPTIONS.index(ui.output_language)
+            if ui.output_language in LANG_OPTIONS
+            else 0,
+        )
+        st.divider()
 
         # Contextual metadata passed to the prompt (not extracted from the input text)
         ui.topic = st.text_input("Tema / materia", value=ui.topic)
@@ -187,14 +202,19 @@ def main() -> None:
 
         elif ui.input_type == "youtube":
             st.subheader("▶️ YouTube")
-            # Placeholder UI: extraction/transcription not implemented yet
-            st.caption("Todavía no está implementado el extractor. Por ahora solo UI.")
-            st.text_input("URL de YouTube", value="", placeholder="https://www.youtube.com/watch?v=...")
+            # Placeholder UI: extraction/transcription
+            st.session_state.youtube_url = st.text_input(
+                                                            "URL de YouTube",
+                                                            value=st.session_state.get("youtube_url", ""),
+                                                            placeholder="https://www.youtube.com/watch?v=...",
+                                                        )
+
 
         elif ui.input_type == "audio":
             st.subheader("🎧 Audio")
             st.caption("Todavía no está implementada la transcripción. Por ahora solo UI.")
-            st.file_uploader("Subí un audio", type=["mp3", "wav", "m4a", "flac"])
+            uploaded_audio = st.file_uploader("Subí un audio", type=["mp3", "wav", "m4a", "flac", "mp4"])
+            st.session_state.uploaded_audio = uploaded_audio
 
         st.write("")
 
@@ -204,10 +224,52 @@ def main() -> None:
         if run:
             try:
                 run_id = uuid.uuid4().hex[:10]
+                # --- Resolver input -> texto ---
+                if ui.input_type == "text":
+                    text = st.session_state.input_text
+
+                elif ui.input_type == "youtube":
+                    url = (st.session_state.get("youtube_url") or "").strip()
+                    if not url:
+                        raise ValueError("Falta URL de YouTube.")
+                    with st.spinner("Obteniendo transcripción de YouTube..."):
+                        text = get_youtube_text(
+                        url,
+                        subtitles_lang=None if ui.input_language == "auto" else ui.input_language,
+                        whisper_lang=None if ui.input_language == "auto" else ui.input_language,
+                    )
+                    st.session_state.input_text = text  # opcional: para poder verlo si cambiás a 'text'
+
+                elif ui.input_type == "audio":
+                    uploaded = st.session_state.get("uploaded_audio")
+                    if uploaded is None:
+                        raise ValueError("Falta subir un archivo de audio/video.")
+                    suffix = "." + uploaded.name.split(".")[-1].lower() if "." in uploaded.name else ".bin"
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                        tmp.write(uploaded.getbuffer())
+                        tmp_path = tmp.name
+                    try:
+                        with st.spinner("Transcribiendo audio..."):
+                            text = transcribe_audio_file(
+                                tmp_path,
+                                language=None if ui.input_language == "auto" else ui.input_language,
+                            )
+                        st.session_state.input_text = text
+                    finally:
+                        import os
+                        try:
+                            os.remove(tmp_path)
+                        except OSError:
+                            pass
+
+                else:
+                    raise ValueError(f"Input type no soportado: {ui.input_type}")
+                # --- Fin resolver input ---
+
 
                 md = summarize_long_text_to_markdown(
-                                                    text=st.session_state.input_text,
-                                                    language=ui.language,
+                                                    text=text,
+                                                    language=ui.output_language,
                                                     topic=ui.topic,
                                                     role_key=ui.role_key,
                                                     role_custom=ui.role_custom,
